@@ -149,7 +149,7 @@ static int ltermios_setblocking(lua_State *L)
 }
 
 /*-
--- io = termios.canonical(io, canonical, when)
+-- io = termios.setcanonical(io, canonical, when)
 
 Turns canonical mode on and off for a TTY.  Canonical defaults to true.
 
@@ -165,7 +165,7 @@ static int optboolean(lua_State* L, int narg, int d)
     }
     return lua_toboolean(L, narg);
 }
-static int ltermios_canonical(lua_State *L)
+static int ltermios_setcanonical(lua_State *L)
 {
     int fd = check_fileno(L, 1);
     int canonical = optboolean(L, 2, 1);
@@ -396,10 +396,8 @@ static const luaL_reg termios[] =
 {
     {"fileno",            ltermios_fileno},
     {"setblocking",       ltermios_setblocking},
-    {"nonblock",          ltermios_setblocking}, /* for backwards compatibility TODO remove */
-    {"canonical",         ltermios_canonical}, /* TODO should be called setcanonical() */
+    {"setcanonical",      ltermios_setcanonical},
     {"tcflush",           ltermios_tcflush},
-    {"tcraw",             ltermios_cfraw}, /* for backwards compatibility TODO remove*/
     {"cfraw",             ltermios_cfraw},
     {"cfsetspeed",        ltermios_cfsetspeed},
     {"cfsetispeed",       ltermios_cfsetispeed},
