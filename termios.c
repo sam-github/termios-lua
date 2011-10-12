@@ -140,13 +140,18 @@ Turns canonical mode on and off for a TTY.  Canonical defaults to true.
 
 When is "now", "drain", or "flush". Default is "flush".
 */
+/* TODO should canonical default to false? */
+static int optboolean(lua_State* L, int narg, int d)
+{
+    if (lua_isnil(L, narg)) {
+        return d;
+    }
+    return lua_toboolean(L, narg);
+}
 static int ltermios_canonical(lua_State *L)
 {
     int fd = check_fileno(L, 1);
-    int canonical = lua_toboolean(L, 2);
-    if (lua_isnil(L, 2)) {
-        canonical = 1;
-    }
+    int canonical = optboolean(L, 2, 1);
     int opt = check_when(L, 3);
     
     struct termios termios={0};
@@ -330,7 +335,7 @@ static int ltermios_cfraw(lua_State *L)
 
 The path must exist, and is opened read-write.
 */
-/* Should I just depend on luaposix for this? */
+/* Could I depend on luaposix for this? */
 static int ltermios_open(lua_State* L)
 {
     const char* path = luaL_checkstring(L, 1);
@@ -348,7 +353,7 @@ static int ltermios_open(lua_State* L)
 /*-
 -- termios.close(fd)
 
-Close fd.
+Close fd, which must be a number, not an io object.
 */
 static int ltermios_close(lua_State *L)
 {
@@ -361,10 +366,10 @@ static const luaL_reg termios[] =
 {
     {"fileno",            ltermios_fileno},
     {"setblocking",       ltermios_setblocking},
-    {"nonblock",          ltermios_setblocking}, /* for backwards compatibility */
-    {"canonical",         ltermios_canonical}, /* should be called setcanonical()? */
+    {"nonblock",          ltermios_setblocking}, /* for backwards compatibility TODO remove */
+    {"canonical",         ltermios_canonical}, /* TODO should be called setcanonical() */
     {"tcflush",           ltermios_tcflush},
-    {"tcraw",             ltermios_cfraw}, /* for backwards compatibility */
+    {"tcraw",             ltermios_cfraw}, /* for backwards compatibility TODO remove*/
     {"cfraw",             ltermios_cfraw},
     {"cfsetspeed",        ltermios_cfsetspeed},
     {"cfsetispeed",       ltermios_cfsetispeed},
