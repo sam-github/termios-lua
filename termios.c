@@ -31,6 +31,13 @@ THE POSSIBILITY OF SUCH DAMAGE.
 These functions take either file descriptor numbers, or io objects from the
 standard library as arguments.
 
+
+Notes:
+
+- Haven't tested portability, might need to test _BSD_SOURCE to see if cfsetspeed() or cfmakeraw() exist
+- Error strings could be annotated with info about the system call and args that failed
+- Could make better effort to document the functions, but the man pages really are the final reference.
+
 */
 
 #include <assert.h>
@@ -47,12 +54,6 @@ standard library as arguments.
 #include "lauxlib.h"
 #include "lualib.h"
 
-/*
-Notes:
-
-- Haven't tested portability, might need to test _BSD_SOURCE to see if cfsetspeed() or cfmakeraw() exist
-- Error strings could be annotated with info about the system call and args that failed
-*/
 
 #define REGID "wt.termios"
 
@@ -329,6 +330,50 @@ static int ltermios_tcflush(lua_State *L)
 }
 
 /*-
+-- io = termios.tcdrain(io).
+
+See man page for tcdrain()
+
+Returns io on success, nil, errmsg, errno on failure.
+*/
+static int ltermios_tcdrain(lua_State *L)
+{
+    int fd = check_fileno(L, 1);
+
+    if(tcdrain(fd) < 0) {
+        return push_error(L);
+    }
+
+    lua_settop(L, 1);
+
+    return 1;
+}
+
+/*-
+-- io = termios.tcsendbreak(io, duration).
+
+See man page for tcsendbreak().
+
+Duration is optional, and defaults to zero. If non-zero, its meaning is
+apparently implementation-defined, it might even be ignored.
+
+Returns io on success, nil, errmsg, errno on failure.
+*/
+static int ltermios_tcsendbreak(lua_State *L)
+{
+    int fd = check_fileno(L, 1);
+    int duration = luaL_optint(L, 2, 0);
+
+    if(tcsendbreak(fd, duration) < 0) {
+        return push_error(L);
+    }
+
+    lua_settop(L, 1);
+
+    return 1;
+}
+
+/*-
 -- io = termios.cfraw(io, when)
 
 See man page for cfmakeraw()
@@ -392,12 +437,20 @@ static int ltermios_close(lua_State *L)
     return 0;
 }
 
+/*
+Missing termios functions TBD:
+- wrapping struct termios... quite the task
+- cfgetispeed()
+- cfgetospeed()
+*/
 static const luaL_reg termios[] =
 {
     {"fileno",            ltermios_fileno},
     {"setblocking",       ltermios_setblocking},
     {"setcanonical",      ltermios_setcanonical},
     {"tcflush",           ltermios_tcflush},
+    {"tcdrain",           ltermios_tcdrain},
+    {"tcsendbreak",       ltermios_tcsendbreak},
     {"cfraw",             ltermios_cfraw},
     {"cfsetspeed",        ltermios_cfsetspeed},
     {"cfsetispeed",       ltermios_cfsetispeed},
