@@ -28,11 +28,10 @@ THE POSSIBILITY OF SUCH DAMAGE.
 /*-
 ** termios - get and set terminal attributes, line control, and baud rate
 
-These functions take either file descriptors (numbers), or io objects from the
+These functions take either file descriptor numbers, or io objects from the
 standard library as arguments.
-*/
 
-/* TODO - use standard failure idiom: return nil, errmsg, errno */
+*/
 
 #include <assert.h>
 #include <errno.h>
@@ -48,9 +47,25 @@ standard library as arguments.
 #include "lauxlib.h"
 #include "lualib.h"
 
+/*
+Notes:
+
+- Haven't tested portability, might need to test _BSD_SOURCE to see if cfsetspeed() or cfmakeraw() exist
+- Error strings could be annotated with info about the system call and args that failed
+*/
 
 #define REGID "wt.termios"
 
+static int push_error(lua_State* L)
+{
+    lua_pushnil(L);
+    lua_pushstring(L, strerror(errno));
+    lua_pushinteger(L, errno);
+
+    return 3;
+}
+
+/* for a closed io object, errors with same emsg as lua's io library */
 static int check_fileno(lua_State *L, int index)
 {
     if (lua_isnumber(L, index)) {
@@ -73,24 +88,22 @@ static int check_when(lua_State *L, int index)
     return opti[ luaL_checkoption(L, index, "flush", opts) ];
 }
 
-static void check_tcgetattr(lua_State *L, int fd, struct termios *termios)
-{
-    if (tcgetattr(fd, termios) < 0) {
-        luaL_error(L, "tcgetattr failed [%d] %s", errno, strerror(errno));
+#define check_tcgetattr(L, fd, termios) \
+    if (tcgetattr(fd, termios) < 0) { \
+        return push_error(L); \
     }
-}
 
-static void check_tcsetattr(lua_State *L, int fd, int opt, struct termios *termios)
-{
-    if (tcsetattr(fd, opt, termios) < 0) {
-        luaL_error(L, "tcsetattr failed [%d] %s", errno, strerror(errno));
+#define check_tcsetattr(L, fd, opt, termios) \
+    if (tcsetattr(fd, opt, termios) < 0) { \
+        return push_error(L); \
     }
-}
 
 /*-
 -- fd = termios.fileno(io)
 
 Return the file descriptor number for the specified io object.
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 static int ltermios_fileno(lua_State *L)
 {
@@ -104,7 +117,9 @@ static int ltermios_fileno(lua_State *L)
 /*-
 -- io = termios.setblocking(io[, blocking])
 
-blocking is true to set blocking, and false to set non-blocking (default is false)
+Blocking is true to set blocking, and false to set non-blocking (default is false)
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 static int ltermios_setblocking(lua_State *L)
 {
@@ -113,7 +128,7 @@ static int ltermios_setblocking(lua_State *L)
     
     int flags = fcntl(fd, F_GETFL);
     if (flags<0) {
-        return luaL_error(L, "fcntl failed [%d] %s", errno, strerror(errno));
+        return push_error(L);
     }
     
     /* to SET blocking, we CLEAR O_NONBLOCK */
@@ -125,7 +140,7 @@ static int ltermios_setblocking(lua_State *L)
     
     flags = fcntl(fd, F_SETFL, flags);
     if (flags<0) {
-        return luaL_error(L, "fcntl failed [%d] %s", errno, strerror(errno));
+        return push_error(L);
     }
     
     lua_settop(L, 1);
@@ -139,6 +154,8 @@ static int ltermios_setblocking(lua_State *L)
 Turns canonical mode on and off for a TTY.  Canonical defaults to true.
 
 When is "now", "drain", or "flush". Default is "flush".
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 /* TODO should canonical default to false? */
 static int optboolean(lua_State* L, int narg, int d)
@@ -155,6 +172,7 @@ static int ltermios_canonical(lua_State *L)
     int opt = check_when(L, 3);
     
     struct termios termios={0};
+
     check_tcgetattr(L, fd, &termios);
 
     if (canonical) {
@@ -182,6 +200,8 @@ Speed is the baud rate, and must be one of those supported by termios, 0, 1200,
 1400, 4800, 9600, 38400 are common.
 
 When is "now", "drain", or "flush". Default is "flush".
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 
 typedef int cfspeedfn(struct termios *termios_p, speed_t speed);
@@ -287,6 +307,8 @@ static int ltermios_cfsetospeed(lua_State* L)
 See man page for tcflush()
 
 Direction is either "in", "out", or "both". It defaults to "both".
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 static int ltermios_tcflush(lua_State *L)
 {
@@ -298,7 +320,7 @@ static int ltermios_tcflush(lua_State *L)
     int opt = opti[ luaL_checkoption(L, 2, "both", opts) ];
 
     if(tcflush(fd, opt) < 0) {
-        return luaL_error(L, "tcflush failed [%d] %s", errno, strerror(errno));
+        return push_error(L);
     }
 
     lua_settop(L, 1);
@@ -312,6 +334,8 @@ static int ltermios_tcflush(lua_State *L)
 See man page for cfmakeraw()
 
 When is "now", "drain", or "flush". Default is "flush".
+
+Returns io on success, nil, errmsg, errno on failure.
 */
 static int ltermios_cfraw(lua_State *L)
 {
@@ -334,6 +358,8 @@ static int ltermios_cfraw(lua_State *L)
 -- fd = termios.open(path)
 
 The path must exist, and is opened read-write.
+
+Returns fd on success, nil, errmsg, errno on failure.
 */
 /* Could I depend on luaposix for this? */
 static int ltermios_open(lua_State* L)
@@ -342,7 +368,7 @@ static int ltermios_open(lua_State* L)
     int fd = open(path, O_NOCTTY|O_RDWR);
 
     if (fd < 0) {
-        return luaL_error(L, "open %s failed [%d] %s", path, errno, strerror(errno));
+        return push_error(L);
     }
 
     lua_pushinteger(L, fd);
@@ -353,11 +379,15 @@ static int ltermios_open(lua_State* L)
 /*-
 -- termios.close(fd)
 
-Close fd, which must be a number, not an io object.
+Close an fd, which must be a number, not an io object.
+
+Returns nothing on success, nil, errmsg, errno on failure.
 */
 static int ltermios_close(lua_State *L)
 {
-    close(luaL_checkint(L, 1));
+    if (close(luaL_checkint(L, 1)) < 0) {
+            return push_error(L);
+    }
 
     return 0;
 }
