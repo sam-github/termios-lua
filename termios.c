@@ -200,86 +200,108 @@ Set speed for input and output, input only, or output only.
 Speed is the baud rate, and must be one of those supported by termios, 0, 1200,
 1400, 4800, 9600, 38400 are common.
 
+For output, a speed of zero disconnects the line.
+
+For input, a speed of zero means set the input speed to the output speed.
+
 When is "now", "drain", or "flush". Default is "flush".
 
 Returns io on success, nil, errmsg, errno on failure.
 */
+
+static struct {
+    speed_t speed;
+    int baud;
+} speeds[] = {
+#ifdef B0
+    { B0, 0 },
+#endif
+#ifdef B50
+    { B50, 50 },
+#endif
+#ifdef B75
+    { B75, 75 },
+#endif
+#ifdef B110
+    { B110, 110 },
+#endif
+#ifdef B134
+    { B134, 134 },
+#endif
+#ifdef B150
+    { B150, 150 },
+#endif
+#ifdef B200
+    { B200, 200 },
+#endif
+#ifdef B300
+    { B300, 300 },
+#endif
+#ifdef B600
+    { B600, 600 },
+#endif
+#ifdef B1200
+    { B1200, 1200 },
+#endif
+#ifdef B1800
+    { B1800, 1800 },
+#endif
+#ifdef B2400
+    { B2400, 2400 },
+#endif
+#ifdef B4800
+    { B4800, 4800 },
+#endif
+#ifdef B9600
+    { B9600, 9600 },
+#endif
+#ifdef B19200
+    { B19200, 19200 },
+#endif
+#ifdef B38400
+    { B38400, 38400 },
+#endif
+#ifdef B57600
+    { B57600, 57600 },
+#endif
+#ifdef B115200
+    { B115200, 115200 },
+#endif
+#ifdef B230400
+    { B230400, 230400 },
+#endif
+};
+static int SPEEDS = sizeof(speeds)/sizeof(speeds[0]);
 
 typedef int cfspeedfn(struct termios *termios_p, speed_t speed);
 
 static int setspeed(lua_State* L, cfspeedfn* speedfn)
 {
     int fd = check_fileno(L, 1);
+    int baud = luaL_checkint(L, 2);
     int opt = check_when(L, 3);
     speed_t speed = 0;
     struct termios termios;
+    int i;
 
-    switch(luaL_checkint(L, 2)) {
-#ifdef B0
-        case 0: speed = B0; break;
-#endif
-#ifdef B50
-        case 50: speed = B50; break;
-#endif
-#ifdef B75
-        case 75: speed = B75; break;
-#endif
-#ifdef B110
-        case 110: speed = B110; break;
-#endif
-#ifdef B134
-        case 134: speed = B134; break;
-#endif
-#ifdef B150
-        case 150: speed = B150; break;
-#endif
-#ifdef B200
-        case 200: speed = B200; break;
-#endif
-#ifdef B300
-        case 300: speed = B300; break;
-#endif
-#ifdef B600
-        case 600: speed = B600; break;
-#endif
-#ifdef B1200
-        case 1200: speed = B1200; break;
-#endif
-#ifdef B1800
-        case 1800: speed = B1800; break;
-#endif
-#ifdef B2400
-        case 2400: speed = B2400; break;
-#endif
-#ifdef B4800
-        case 4800: speed = B4800; break;
-#endif
-#ifdef B9600
-        case 9600: speed = B9600; break;
-#endif
-#ifdef B19200
-        case 19200: speed = B19200; break;
-#endif
-#ifdef B38400
-        case 38400: speed = B38400; break;
-#endif
-#ifdef B57600
-        case 57600: speed = B57600; break;
-#endif
-#ifdef B115200
-        case 115200: speed = B115200; break;
-#endif
-#ifdef B230400
-        case 230400: speed = B230400; break;
-#endif
-        default:
-            return luaL_argerror(L, 2, "unsupported serial speed");
+    for (i = 0; i < SPEEDS; i++) {
+        if (speeds[i].baud == baud) {
+            speed = speeds[i].speed;
+            break;
+        }
+    }
+
+    if (i == SPEEDS) {
+        lua_pushnil(L);
+        lua_pushstring(L, "unsupported speed");
+        lua_pushnumber(L, EINVAL);
+        return 3;
     }
 
     check_tcgetattr(L, fd, &termios);
 
     if (speedfn(&termios, speed) < 0) {
-        return luaL_error(L, "setspeed failed [%d] %s", errno, strerror(errno));
+        return push_error(L);
     }
 
     check_tcsetattr(L, fd, opt, &termios);
