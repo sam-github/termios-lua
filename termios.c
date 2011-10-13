@@ -26,18 +26,21 @@ THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 /*-
-** termios - get and set terminal attributes, line control, and baud rate
+** termios - get and set terminal attributes, line control, get and set baud rate
 
-These functions take either file descriptor numbers, or io objects from the
-standard library as arguments.
+Arguments are conventional:
+- io: either an io object from the standard io library or a file descriptor number
+- fd: a file descriptor number
 
+Return on failure is nil, followed by the error message, see strerror(), followed by
+the error number, see errno.h.
 
-Notes:
-
-- Haven't tested portability, might need to test _BSD_SOURCE to see if cfsetspeed() or cfmakeraw() exist
-- Error strings could be annotated with info about the system call and args that failed
-- Could make better effort to document the functions, but the man pages really are the final reference.
-
+Notes and caveats:
+- Haven't tested portability, might need to test _BSD_SOURCE to see if cfsetspeed() or cfmakeraw() exist.
+- Error strings could be annotated with info about the system call and args that failed.
+- Could make better effort to document the functions, but your system's man pages really are the final reference.
+- Doesn't support access to all the bits and pieces of struct termios... wrapping that thing as
+  userdata would be quite the task.
 */
 
 #include <assert.h>
@@ -104,7 +107,7 @@ static int check_when(lua_State *L, int index)
 
 Return the file descriptor number for the specified io object.
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_fileno(lua_State *L)
 {
@@ -120,7 +123,7 @@ static int ltermios_fileno(lua_State *L)
 
 Blocking is true to set blocking, and false to set non-blocking (default is false)
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_setblocking(lua_State *L)
 {
@@ -156,7 +159,7 @@ Turns canonical mode on and off for a TTY.  Canonical defaults to true.
 
 When is "now", "drain", or "flush". Default is "flush".
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 /* TODO should canonical default to false? */
 static int optboolean(lua_State* L, int narg, int d)
@@ -190,25 +193,7 @@ static int ltermios_setcanonical(lua_State *L)
     return 1;
 }
 
-/*-
--- io = termios.cfsetspeed(io, speed, when)
--- io = termios.cfsetispeed(io, speed, when)
--- io = termios.cfsetospeed(io, speed, when)
-
-Set speed for input and output, input only, or output only.
-
-Speed is the baud rate, and must be one of those supported by termios, 0, 1200,
-1400, 4800, 9600, 38400 are common.
-
-For output, a speed of zero disconnects the line.
-
-For input, a speed of zero means set the input speed to the output speed.
-
-When is "now", "drain", or "flush". Default is "flush".
-
-Returns io on success, nil, errmsg, errno on failure.
-*/
-
+/* Everything in my <asm-generic/termbits.h>: */
 static struct {
     speed_t speed;
     int baud;
@@ -270,12 +255,94 @@ static struct {
 #ifdef B230400
     { B230400, 230400 },
 #endif
+#ifdef B460800
+    { B460800, 460800 },
+#endif
+#ifdef B500000
+    { B500000, 500000 },
+#endif
+#ifdef B576000
+    { B576000, 576000 },
+#endif
+#ifdef B921600
+    { B921600, 921600 },
+#endif
+#ifdef B1000000
+    { B1000000, 1000000 },
+#endif
+#ifdef B1152000
+    { B1152000, 1152000 },
+#endif
+#ifdef B1500000
+    { B1500000, 1500000 },
+#endif
+#ifdef B2000000
+    { B2000000, 2000000 },
+#endif
+#ifdef B2500000
+    { B2500000, 2500000 },
+#endif
+#ifdef B3000000
+    { B3000000, 3000000 },
+#endif
+#ifdef B3500000
+    { B3500000, 3500000 },
+#endif
+#ifdef B4000000
+    { B4000000, 4000000 },
+#endif
 };
 static int SPEEDS = sizeof(speeds)/sizeof(speeds[0]);
 
-typedef int cfspeedfn(struct termios *termios_p, speed_t speed);
+/*-
+-- speeds = { 0, 50, ..., [0] = true, [50] = true, ... }
 
-static int setspeed(lua_State* L, cfspeedfn* speedfn)
+speeds contains a list of supported speeds, iterable with ipairs(),
+as well as setting each supported speed in the table to true.
+*/
+static void ltermios_newspeeds(lua_State* L)
+{
+    int i;
+
+    lua_newtable(L);
+
+    for (i = 0; i < SPEEDS; i++) {
+        int speed = speeds[i].baud;
+
+        /* speeds[i+1] = speed */
+        lua_pushinteger(L, i+1);
+        lua_pushinteger(L, speed);
+        lua_settable(L, -3);
+
+        /* speeds[speed] = true */
+        lua_pushinteger(L, speed);
+        lua_pushboolean(L, 1);
+        lua_settable(L, -3);
+    }
+}
+
+/*-
+-- io = termios.cfsetspeed(io, speed, when)
+-- io = termios.cfsetispeed(io, speed, when)
+-- io = termios.cfsetospeed(io, speed, when)
+
+Set speed for input and output, input only, or output only.
+
+Speed is the baud rate, and must be one of those supported by termios, 0, 1200,
+1400, 4800, 9600, 38400 are common.
+
+For output, a speed of zero disconnects the line.
+
+For input, a speed of zero means set the input speed to the output speed.
+
+When is "now", "drain", or "flush". Default is "flush".
+
+Returns io on success, or nil, errmsg, errno on failure.
+*/
+
+typedef int cfsetspeedfn(struct termios *termios_p, speed_t speed);
+
+static int setspeed(lua_State* L, cfsetspeedfn* speedfn)
 {
     int fd = check_fileno(L, 1);
     int baud = luaL_checkint(L, 2);
@@ -325,13 +392,69 @@ static int ltermios_cfsetospeed(lua_State* L)
 }
 
 /*-
+-- speed = termios.cfgetispeed(io)
+-- speed = termios.cfgetospeed(io)
+
+Get speed for input or output.
+
+Speed is the baud rate.
+
+Returns speed on success, or nil, errmsg, errno on failure.
+
+If errmsg is "unsupported", the errno will be followed by the underlying
+speed_t value returned by the C library, which may be useful for debugging.
+*/
+typedef speed_t cfgetspeedfn(const struct termios *termios_p);
+
+static int getspeed(lua_State* L, cfgetspeedfn* speedfn)
+{
+    int fd = check_fileno(L, 1);
+    struct termios termios;
+    speed_t speed = 0;
+    int baud = 0;
+    int i;
+
+    check_tcgetattr(L, fd, &termios);
+
+    speed = speedfn(&termios);
+
+    for (i = 0; i < SPEEDS; i++) {
+        if (speeds[i].speed == speed) {
+            baud = speeds[i].baud;
+            break;
+        }
+    }
+
+    if (i == SPEEDS) {
+        lua_pushnil(L);
+        lua_pushstring(L, "unsupported");
+        lua_pushnumber(L, ENOTSUP);
+        lua_pushnumber(L, speed);
+        return 4;
+    }
+
+    lua_pushnumber(L, baud);
+
+    return 1;
+}
+
+static int ltermios_cfgetispeed(lua_State* L)
+{
+    return getspeed(L, cfgetispeed);
+}
+static int ltermios_cfgetospeed(lua_State* L)
+{
+    return getspeed(L, cfgetospeed);
+}
+
+/*-
 -- io = termios.tcflush(io, direction)
 
 See man page for tcflush()
 
 Direction is either "in", "out", or "both". It defaults to "both".
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_tcflush(lua_State *L)
 {
@@ -356,7 +479,7 @@ static int ltermios_tcflush(lua_State *L)
 
 See man page for tcdrain()
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_tcdrain(lua_State *L)
 {
@@ -379,7 +502,7 @@ See man page for tcsendbreak().
 Duration is optional, and defaults to zero. If non-zero, its meaning is
 apparently implementation-defined, it might even be ignored.
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_tcsendbreak(lua_State *L)
 {
@@ -402,7 +525,7 @@ See man page for cfmakeraw()
 
 When is "now", "drain", or "flush". Default is "flush".
 
-Returns io on success, nil, errmsg, errno on failure.
+Returns io on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_cfraw(lua_State *L)
 {
@@ -426,7 +549,7 @@ static int ltermios_cfraw(lua_State *L)
 
 The path must exist, and is opened read-write.
 
-Returns fd on success, nil, errmsg, errno on failure.
+Returns fd on success, or nil, errmsg, errno on failure.
 */
 /* Could I depend on luaposix for this? */
 static int ltermios_open(lua_State* L)
@@ -448,7 +571,7 @@ static int ltermios_open(lua_State* L)
 
 Close an fd, which must be a number, not an io object.
 
-Returns nothing on success, nil, errmsg, errno on failure.
+Returns nothing on success, or nil, errmsg, errno on failure.
 */
 static int ltermios_close(lua_State *L)
 {
@@ -459,12 +582,6 @@ static int ltermios_close(lua_State *L)
     return 0;
 }
 
-/*
-Missing termios functions TBD:
-- wrapping struct termios... quite the task
-- cfgetispeed()
-- cfgetospeed()
-*/
 static const luaL_reg termios[] =
 {
     {"fileno",            ltermios_fileno},
@@ -477,6 +594,8 @@ static const luaL_reg termios[] =
     {"cfsetspeed",        ltermios_cfsetspeed},
     {"cfsetispeed",       ltermios_cfsetispeed},
     {"cfsetospeed",       ltermios_cfsetospeed},
+    {"cfgetispeed",       ltermios_cfgetispeed},
+    {"cfgetospeed",       ltermios_cfgetospeed},
     {"open",              ltermios_open},
     {"close",             ltermios_close},
     {NULL, NULL}
@@ -485,6 +604,10 @@ static const luaL_reg termios[] =
 LUALIB_API int luaopen_termios (lua_State *L)
 {
     luaL_register(L, "termios", termios);
+
+    ltermios_newspeeds(L);
+
+    lua_setfield(L, -2, "speeds");
 
     return 1;
 }
